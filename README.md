@@ -1,6 +1,6 @@
 # awesomeC2
 
-A compact, research-oriented command-and-control (C2) framework for **authorized adversary emulation and lab use only**.
+**AwesomeC2** is a post exploitation framework for advanced Red Team operations, focused on exploiting modern and complex environments. for **authorized adversary emulation and lab use only**.
 
 The project contains a Go server/operator pair, a Go terminal UI, a Windows client written in C, a small TLS/WebSocket bridge, protocol libraries, and deployment examples. It is intentionally small enough to read, audit, and modify.
 
