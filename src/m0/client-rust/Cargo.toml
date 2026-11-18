@@ -1,0 +1,23 @@
+[package]
+name = "c2client-m0"
+version = "0.1.0"
+edition = "2021"
+description = "Authorized red-team C2 client — M0 loopback slice (no third-party deps)"
+license = "UNLICENSED"
+publish = false
+
+[[bin]]
+name = "c2client"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# M0 intentionally has zero external crates so `cargo build --offline` works on
+# air-gapped build hosts. The M1 crypto suite (X25519 + HKDF + AES-256-GCM /
+# ChaCha20-Poly1305) is wired through src/crypto.rs.
+[dependencies]

@@ -1,0 +1,32 @@
+# Build artifacts (binaries are not committed)
+/build/*
+!/build/m0/
+/build/m0/bin/
+/build/m0/logs/
+src/*/target/
+src/*/*/target/
+src/m0/*/target/
+target/
+**/target/
+
+# Generated profiles may name a live endpoint — never commit them
+profiles/**
+!profiles/m0/
+profiles/m0/**
+!profiles/m0/.gitkeep
+
+# Test run logs
+tests/m0/tmp/
+tests/tmp/
+*.log
+
+# Local editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Never commit secrets
+*.psk
+secrets/
+creds.json
