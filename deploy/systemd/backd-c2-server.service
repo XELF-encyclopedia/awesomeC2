@@ -1,0 +1,35 @@
+[Unit]
+Description=Backd C2 server (dual WebSocket listener)
+Documentation=file:///opt/backd/c2/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=backd
+Group=backd
+WorkingDirectory=/opt/backd/c2
+ExecStart=/opt/backd/c2/server -config /opt/backd/c2/config.json
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+# Hardening (Ubuntu 22.04 / systemd 249)
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+ReadWritePaths=/opt/backd/c2/files /opt/backd/c2/audit.log
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

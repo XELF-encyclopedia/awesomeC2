@@ -1,0 +1,42 @@
+# build output
+bin/
+out/
+dist/
+verify/
+*.exe
+*.dll
+*.pdb
+*.o
+*.obj
+*.a
+*.lib
+*.log
+*.b64
+
+# generated client config (may contain a real PSK)
+client/src/generated_config.h
+
+# local configuration and secrets
+*.local.*
+*.secret
+*.psk
+creds.json
+config.json
+c2tui-config.json
+i5137-tui-test*.json
+actions.jsonl
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Go
+/vendor/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

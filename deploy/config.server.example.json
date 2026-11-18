@@ -1,0 +1,31 @@
+{
+  "client_listen": "127.0.0.1:9909",
+  "operator_listen": "127.0.0.1:9910",
+  "client_psk": "base64:REPLACE_WITH_32_BYTE_RANDOM_BASE64",
+  "clients": [
+    { "id": "client-01", "psk": "base64:REPLACE_PER_CLIENT_OPTIONAL" }
+  ],
+  "operators": [
+    { "name": "ops", "psk": "base64:REPLACE_WITH_32_BYTE_RANDOM_BASE64" }
+  ],
+  "heartbeat_sec": 15,
+  "jitter_pct": 20,
+  "session_timeout_sec": 90,
+  "max_sessions": 512,
+  "max_frame_bytes": 1048576,
+  "files_dir": "/opt/backd/c2/files",
+  "audit_log": "/opt/backd/c2/audit.log",
+
+  "allow_shell": false,
+  "allow_advanced": false,
+
+  "client_msgs_per_sec": 100,
+  "operator_msgs_per_sec": 50,
+  "task_max_inflight": 4,
+  "task_max_attempts": 1,
+  "task_output_max": 1048576,
+  "max_file_size": 67108864,
+  "audit_hash_chain": true,
+
+  "tls": { "cert": "", "key": "" }
+}
