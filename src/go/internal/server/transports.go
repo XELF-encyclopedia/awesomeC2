@@ -1,4 +1,4 @@
-package server
+﻿package server
 
 import (
 	"context"
@@ -62,7 +62,9 @@ func (s *Server) noteBound(transport string, addr net.Addr) {
 	if addr == nil {
 		return
 	}
+	s.boundMu.Lock()
 	s.bound[transport] = addr.String()
+	s.boundMu.Unlock()
 }
 
 func (s *Server) startClientListener(l ListenerConfig) error {
@@ -235,11 +237,7 @@ func (s *Server) dnsLoop(pc net.PacketConn, suffix string) {
 		}
 		query := append([]byte{}, buf[:n]...)
 		go func() {
-			name, err := protocol.ParseQueryName(query)
-			if err != nil {
-				return
-			}
-			payload, err := protocol.DecodeDNSName(name, suffix)
+			payload, err := protocol.ParseDNSQueryPayload(query, suffix)
 			if err != nil {
 				return
 			}
@@ -329,3 +327,4 @@ func (s *Server) WaitHealthy(ctx context.Context) error {
 		return nil
 	}
 }
+

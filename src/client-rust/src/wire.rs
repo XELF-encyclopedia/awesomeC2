@@ -294,6 +294,69 @@ pub fn parse_dns_txt(msg: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// Encode a DNS query for `name` (type TXT, class IN).
+/// Build a query whose questions jointly carry `payload`.  A single QNAME is
+/// limited to 253 octets, so the base32 payload is split into 200-character
+/// chunks (each comfortable below the limit) and each chunk becomes one
+/// question.  The receiver concatenates the decoded questions.
+pub fn build_dns_query_multi(payload: &[u8], suffix: &str, label_len: usize, id: u16) -> Vec<u8> {
+    let mut enc = base32hex_encode(payload);
+    if enc.is_empty() {
+        enc = "x".into();
+    }
+    let ll = if label_len == 0 || label_len > 50 { 50 } else { label_len };
+    let mut names: Vec<String> = Vec::new();
+    let chars: Vec<char> = enc.chars().collect();
+    let mut idx = 0usize;
+    while idx < chars.len() {
+        let take = std::cmp::min(200, chars.len() - idx);
+        let part: String = chars[idx..idx + take].iter().collect();
+        idx += take;
+        let mut name = Vec::new();
+        let bytes = part.as_bytes();
+        let mut p = 0usize;
+        while bytes.len() - p > ll {
+            name.push(bytes[p..p + ll].to_vec());
+            p += ll;
+        }
+        if p < bytes.len() {
+            name.push(bytes[p..].to_vec());
+        }
+        let mut s = name
+            .iter()
+            .map(|l| String::from_utf8_lossy(l).to_string())
+            .collect::<Vec<_>>()
+            .join(".");
+        let sfx = suffix.trim_end_matches('.');
+        if !sfx.is_empty() {
+            s.push('.');
+            s.push_str(sfx);
+        }
+        names.push(s);
+    }
+    if names.is_empty() {
+        names.push(suffix.trim_end_matches('.').to_string());
+    }
+    let mut q = Vec::new();
+    q.extend_from_slice(&id.to_be_bytes());
+    q.extend_from_slice(&[0x01, 0x00]);
+    q.extend_from_slice(&(names.len() as u16).to_be_bytes());
+    q.extend_from_slice(&[0, 0, 0, 0, 0, 0]);
+    for name in names {
+        for label in name.trim_end_matches('.').split('.') {
+            if label.is_empty() {
+                continue;
+            }
+            let b = label.as_bytes();
+            let l = std::cmp::min(b.len(), 63);
+            q.push(l as u8);
+            q.extend_from_slice(&b[..l]);
+        }
+        q.push(0);
+        q.extend_from_slice(&[0x00, 0x10, 0x00, 0x01]); // TXT IN
+    }
+    q
+}
+
 pub fn build_dns_query(name: &str, id: u16) -> Vec<u8> {
     let mut q = Vec::new();
     q.extend_from_slice(&id.to_be_bytes());
@@ -311,4 +374,60 @@ pub fn build_dns_query(name: &str, id: u16) -> Vec<u8> {
     q.push(0);
     q.extend_from_slice(&[0x00, 0x10, 0x00, 0x01]); // TXT IN
     q
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query_names(q: &[u8]) -> Vec<String> {
+        assert!(q.len() > 12);
+        let qd = ((q[4] as usize) << 8) | q[5] as usize;
+        let mut off = 12usize;
+        let mut out = Vec::new();
+        for _ in 0..qd {
+            let mut labels = Vec::new();
+            loop {
+                let l = q[off] as usize;
+                if l == 0 {
+                    off += 1;
+                    break;
+                }
+                labels.push(String::from_utf8(q[off + 1..off + 1 + l].to_vec()).unwrap());
+                off += 1 + l;
+            }
+            off += 4; // qtype + qclass
+            out.push(labels.join("."));
+        }
+        out
+    }
+
+    #[test]
+    fn dns_multi_question_roundtrip_600_bytes() {
+        let payload: Vec<u8> = (0..600u32).map(|i| (i * 7 % 251) as u8).collect();
+        let q = build_dns_query_multi(&payload, "test.example.com", 50, 0x1234);
+        let names = query_names(&q);
+        assert!(names.len() >= 2, "expected multiple questions, got {}", names.len());
+        let mut joined = Vec::new();
+        for n in &names {
+            assert!(n.len() <= 253, "question too long: {}", n.len());
+            assert!(n.ends_with("test.example.com"));
+            joined.extend(decode_dns_name(n, "test.example.com").unwrap());
+        }
+        assert_eq!(joined, payload);
+    }
+
+    #[test]
+    fn dns_multi_question_handles_small_payload_and_empty() {
+        for payload in [vec![], b"hi".to_vec(), vec![0u8; 3]] {
+            let q = build_dns_query_multi(&payload, "t.example.com", 50, 1);
+            let names = query_names(&q);
+            assert!(names.len() >= 1);
+            let mut joined = Vec::new();
+            for n in &names {
+                joined.extend(decode_dns_name(n, "t.example.com").unwrap());
+            }
+            assert_eq!(joined, payload);
+        }
+    }
 }

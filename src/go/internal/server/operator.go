@@ -1,4 +1,4 @@
-package server
+﻿package server
 
 import (
 	"context"
@@ -72,6 +72,7 @@ func (s *Server) startOperatorListener(l ListenerConfig) error {
 		if transport == "tls" {
 			srv = tls.NewListener(ln, TLSConfig(s.cert))
 		}
+		s.noteBound("operator", ln.Addr())
 		s.addCloser(srv)
 		go func() {
 			for {
@@ -394,7 +395,68 @@ func (s *Server) opDispatch(ctx context.Context, o *OpConn, cmd *protocol.OpCmd)
 				caps = sess.Caps
 			}
 		}
-		return map[string]any{"modules": catalog.Modules, "session_caps": caps}, nil
+		return map[string]any{"modules": s.modReg.All(), "session_caps": caps}, nil
+
+	case "module-search":
+		if err := need("viewer"); err != nil {
+			return nil, err
+		}
+		hits := s.modReg.Search(args.str("q"))
+		return map[string]any{"count": len(hits), "modules": hits}, nil
+
+	case "module-show":
+		if err := need("viewer"); err != nil {
+			return nil, err
+		}
+		name := args.str("name")
+		m, ok := s.modReg.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown module %q", name)
+		}
+		return m, nil
+
+	case "module-run":
+		// External (exec/wasm) modules run on the server host; builtin modules
+		// are forwarded to a client exactly like `run`.
+		if err := need("operator"); err != nil {
+			return nil, err
+		}
+		name := args.str("name")
+		m, ok := s.modReg.Get(name)
+		if !ok {
+			return nil, fmt.Errorf("unknown module %q", name)
+		}
+		if roleRank(o.Role) < roleRank(m.Role()) {
+			return nil, fmt.Errorf("module %s requires role %s", name, m.Role())
+		}
+		modArgs := args.raw("args")
+		if len(modArgs) == 0 || string(modArgs) == "null" {
+			modArgs = json.RawMessage(`{}`)
+		}
+		if m.Kind == "builtin" {
+			sess, err := s.pickSession(o, args.str("sid"))
+			if err != nil {
+				return nil, err
+			}
+			res, err := s.RunTask(ctx, sess, name, modArgs, o.User, time.Duration(args.intv("timeout_ms", 90000))*time.Millisecond)
+			audit(fmt.Sprintf("builtin module=%s ok=%v", name, err == nil))
+			return res, err
+		}
+		// Server-side execution is privileged: require admin and an explicit
+		// confirm token when the manifest is destructive.
+		if err := need("admin"); err != nil {
+			return nil, err
+		}
+		if m.Destructive && args.str("confirm") != name {
+			return nil, fmt.Errorf("module %s is destructive: pass confirm=%s", name, name)
+		}
+		res, err := s.modReg.RunExternal(ctx, m, modArgs)
+		if err != nil {
+			audit(fmt.Sprintf("external module=%s kind=%s err=%s", name, m.Kind, truncate(err.Error(), 200)))
+			return nil, err
+		}
+		audit(fmt.Sprintf("external module=%s kind=%s ok=true", name, m.Kind))
+		return map[string]any{"module": name, "kind": m.Kind, "result": res}, nil
 
 	case "use":
 		if err := need("operator"); err != nil {
@@ -552,10 +614,26 @@ func (s *Server) opDispatch(ctx context.Context, o *OpConn, cmd *protocol.OpCmd)
 			return nil, err
 		}
 		version := args.str("version")
+		s.updMu.Lock()
+		pin := s.updPin
+		approved := make(map[string]bool, len(s.updOk))
+		for k, v := range s.updOk {
+			approved[k] = v
+		}
+		s.updMu.Unlock()
+		if pin != "" {
+			if version != "" && version != pin {
+				return nil, fmt.Errorf("version %s is not the pinned version %s", version, pin)
+			}
+			version = pin
+		}
 		pushed := 0
 		for _, m := range mans {
 			if version != "" && m.Version != version {
 				continue
+			}
+			if !approved[m.Version] {
+				continue // never push unapproved manifests
 			}
 			um := protocol.UpdateManifest{Version: m.Version, Platform: m.Platform, Arch: m.Arch, URL: m.URL,
 				SHA256: m.SHA256, Rollout: m.Rollout, Created: m.Created}
@@ -570,6 +648,141 @@ func (s *Server) opDispatch(ctx context.Context, o *OpConn, cmd *protocol.OpCmd)
 		}
 		audit(fmt.Sprintf("version=%s pushed=%d", version, pushed))
 		return map[string]int{"pushed": pushed}, nil
+
+	case "update-approve":
+		// Operator approval gate: nothing is pushed until a version is approved.
+		if err := need("admin"); err != nil {
+			return nil, err
+		}
+		version := args.str("version")
+		if version == "" {
+			return nil, errors.New("update-approve requires version")
+		}
+		s.updMu.Lock()
+		pin := s.updPin
+		s.updMu.Unlock()
+		if pin != "" && version != pin {
+			return nil, fmt.Errorf("version %s is blocked by pin %s (clear the pin with update-pin version=)", version, pin)
+		}
+		mans, err := s.st.ListManifests(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var target *store.Manifest
+		for i := range mans {
+			if mans[i].Version == version {
+				target = &mans[i]
+				break
+			}
+		}
+		if target == nil {
+			return nil, fmt.Errorf("no published manifest for version %q", version)
+		}
+		s.updMu.Lock()
+		s.updOk[version] = true
+		s.updMu.Unlock()
+		pushed := 0
+		um := protocol.UpdateManifest{Version: target.Version, Platform: target.Platform, Arch: target.Arch,
+			URL: target.URL, SHA256: target.SHA256, Rollout: target.Rollout, Created: target.Created}
+		for _, sess := range s.Sessions() {
+			if !um.Matches(sess.ClientID, sess.OS, sess.Arch) {
+				continue
+			}
+			if err := s.SendMsg(sess, protocol.Update{T: protocol.TUpdate, Manifest: um, Sig: target.Sig}); err == nil {
+				pushed++
+			}
+		}
+		audit(fmt.Sprintf("version=%s pushed=%d", version, pushed))
+		return map[string]any{"approved": version, "pushed": pushed}, nil
+
+	case "update-pin":
+		if err := need("admin"); err != nil {
+			return nil, err
+		}
+		version := args.str("version") // empty clears the pin
+		s.updMu.Lock()
+		s.updPin = version
+		s.updMu.Unlock()
+		audit("pin=" + version)
+		return map[string]any{"pinned": version}, nil
+
+	case "update-rollback":
+		// Push a previously published manifest as the rollback target and mark
+		// the bad version as the rollback pointer for the client.
+		if err := need("admin"); err != nil {
+			return nil, err
+		}
+		bad := args.str("version")
+		good := args.str("target")
+		if bad == "" || good == "" {
+			return nil, errors.New("update-rollback requires version (bad) and target (good)")
+		}
+		mans, err := s.st.ListManifests(ctx)
+		if err != nil {
+			return nil, err
+		}
+		var target *store.Manifest
+		for i := range mans {
+			if mans[i].Version == good {
+				target = &mans[i]
+				break
+			}
+		}
+		if target == nil {
+			return nil, fmt.Errorf("no published manifest for target %q", good)
+		}
+		pushed := 0
+		um := protocol.UpdateManifest{Version: target.Version, Platform: target.Platform, Arch: target.Arch,
+			URL: target.URL, SHA256: target.SHA256, Rollout: 100, Created: target.Created, Rollback: bad}
+		// The stored signature covers the original manifest; adding the rollback
+		// pointer changes the canonical form, so re-sign the rollback manifest.
+		rbSig := protocol.HMACSign(s.updateKey, um.Canonical())
+		for _, sess := range s.Sessions() {
+			if !um.Matches(sess.ClientID, sess.OS, sess.Arch) {
+				continue
+			}
+			if err := s.SendMsg(sess, protocol.Update{T: protocol.TUpdate, Manifest: um, Sig: rbSig}); err == nil {
+				pushed++
+			}
+		}
+		audit(fmt.Sprintf("rollback %s -> %s pushed=%d", bad, good, pushed))
+		return map[string]any{"rollback_from": bad, "to": good, "pushed": pushed}, nil
+
+	case "ai-status":
+		if err := need("viewer"); err != nil {
+			return nil, err
+		}
+		if !s.AIEnabled() {
+			return map[string]any{"enabled": false, "note": "configure ai.enabled + ai.base_url in the server config"}, nil
+		}
+		return map[string]any{"enabled": true, "model": s.cfg.AI.Model, "tools": s.AITools()}, nil
+
+	case "ai-tools":
+		if err := need("viewer"); err != nil {
+			return nil, err
+		}
+		return map[string]any{"enabled": s.AIEnabled(), "tools": s.AITools()}, nil
+
+	case "ai-ask":
+		// Only read-only tools run automatically; destructive tool calls come
+		// back as need_approve and must be re-sent with confirm=<tool>.
+		if err := need("operator"); err != nil {
+			return nil, err
+		}
+		var confirmed []string
+		if c := args.str("confirm"); c != "" {
+			for _, part := range strings.Split(c, ",") {
+				if p := strings.TrimSpace(part); p != "" {
+					confirmed = append(confirmed, p)
+				}
+			}
+		}
+		audit("prompt=" + truncate(args.str("prompt"), 300))
+		res, err := s.AIAsk(ctx, o, args.str("prompt"), confirmed)
+		if err != nil {
+			return nil, err
+		}
+		return res, nil
 
 	case "op-list":
 		if err := need("admin"); err != nil {
@@ -671,3 +884,4 @@ func portOr(a, b int) int {
 }
 
 var _ = sql.ErrNoRows
+

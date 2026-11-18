@@ -1,4 +1,4 @@
-// Command c2server runs the C2V2 server.
+﻿// Command c2server runs the C2V2 server.
 package main
 
 import (
@@ -119,3 +119,9 @@ func main() {
 }
 
 func readRandom(b []byte) (int, error) { return io.ReadFull(crand.Reader, b) }
+
+
+
+var buildVersion = "dev"
+
+

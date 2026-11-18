@@ -1,4 +1,4 @@
-use crate::config::TransportCfg;
+﻿use crate::config::TransportCfg;
 use crate::wire;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
@@ -431,8 +431,7 @@ impl DatagramLink {
                 Ok(())
             }
             DatagramKind::Dns => {
-                let name = wire::encode_dns_name(blob, &self.cfg.suffix, 50);
-                let q = wire::build_dns_query(&name, rand_id());
+                let q = wire::build_dns_query_multi(blob, &self.cfg.suffix, 50, rand_id());
                 self.sock.send(&q)?;
                 let mut buf = vec![0u8; 65535];
                 let n = self.sock.recv(&mut buf)?;
@@ -731,3 +730,4 @@ fn parse_url(url: &str) -> io::Result<(String, u16, String, bool)> {
     };
     Ok((host, port, path.to_string(), tls))
 }
+

@@ -1,4 +1,4 @@
-// Command c2op is the operator CLI for C2V2.
+﻿// Command c2op is the operator CLI for C2V2.
 package main
 
 import (
@@ -293,3 +293,9 @@ Flags: -addr -user -key -key-file -insecure -pin -timeout -o -q
 `)
 	_ = protocol.Version
 }
+
+
+
+var buildVersion = "dev"
+
+

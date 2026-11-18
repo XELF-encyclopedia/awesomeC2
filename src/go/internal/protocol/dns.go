@@ -1,4 +1,4 @@
-package protocol
+﻿package protocol
 
 import (
 	"encoding/base32"
@@ -64,39 +64,124 @@ func DecodeDNSName(name, suffix string) ([]byte, error) {
 	if m := len(enc) % 8; m != 0 {
 		enc += strings.Repeat("=", 8-m)
 	}
-	return b32.DecodeString(enc)
+	return base32.HexEncoding.DecodeString(enc)
 }
 
 // ParseQueryName returns the first question name of a DNS query.
 func ParseQueryName(msg []byte) (string, error) {
+	names, err := ParseQueryNames(msg)
+	if err != nil || len(names) == 0 {
+		return "", err
+	}
+	return names[0], nil
+}
+
+// ParseQueryNames returns every question name in a DNS query.  Multi-question
+// queries are used to carry a full handshake payload, which does not fit in a
+// single 253-octet QNAME.
+func ParseQueryNames(msg []byte) ([]string, error) {
 	if len(msg) < 12 {
-		return "", errors.New("short dns query")
+		return nil, errors.New("short dns query")
 	}
 	qd := int(msg[4])<<8 | int(msg[5])
 	if qd < 1 {
-		return "", errors.New("no question")
+		return nil, errors.New("no question")
 	}
 	off := 12
-	var labels []string
-	for {
-		if off >= len(msg) {
-			return "", errors.New("truncated qname")
+	var names []string
+	for i := 0; i < qd; i++ {
+		var labels []string
+		for {
+			if off >= len(msg) {
+				return names, errors.New("truncated qname")
+			}
+			l := int(msg[off])
+			if l == 0 {
+				off++
+				break
+			}
+			if msg[off]&0xC0 == 0xC0 {
+				return names, errors.New("compressed qname unsupported")
+			}
+			if l > 63 || off+1+l > len(msg) {
+				return names, errors.New("bad label")
+			}
+			labels = append(labels, string(msg[off+1:off+1+l]))
+			off += 1 + l
 		}
-		l := int(msg[off])
-		if l == 0 {
-			off++
-			break
-		}
-		if msg[off]&0xC0 == 0xC0 {
-			return "", errors.New("compressed qname unsupported")
-		}
-		if l > 63 || off+1+l > len(msg) {
-			return "", errors.New("bad label")
-		}
-		labels = append(labels, string(msg[off+1:off+1+l]))
-		off += 1 + l
+		off += 4 // qtype + qclass
+		names = append(names, strings.Join(labels, "."))
 	}
-	return strings.Join(labels, "."), nil
+	return names, nil
+}
+
+// EncodeDNSQuery builds one query whose questions together carry payload.
+// A single QNAME is limited to 253 octets, so a full handshake (public key,
+// nonce and PSK tag) is split over multiple questions.  Each chunk is 200
+// base32 characters, which keeps every name comfortably below the limit.
+func EncodeDNSQuery(payload []byte, suffix string, labelLen int) []byte {
+	if labelLen <= 0 || labelLen > 50 {
+		labelLen = 50
+	}
+	enc := strings.ToLower(b32.EncodeToString(payload))
+	if enc == "" {
+		enc = "x"
+	}
+	const chunkChars = 200
+	var names []string
+	for len(enc) > 0 {
+		take := chunkChars
+		if take > len(enc) {
+			take = len(enc)
+		}
+		part := enc[:take]
+		enc = enc[take:]
+		var labels []string
+		for len(part) > labelLen {
+			labels = append(labels, part[:labelLen])
+			part = part[labelLen:]
+		}
+		if part != "" {
+			labels = append(labels, part)
+		}
+		name := strings.Join(labels, ".")
+		if s := strings.TrimSuffix(suffix, "."); s != "" {
+			name += "." + s
+		}
+		names = append(names, name)
+	}
+	out := make([]byte, 12)
+	out[0], out[1] = 0x12, 0x34
+	out[2] = 0x01 // RD
+	out[4], out[5] = byte(len(names)>>8), byte(len(names))
+	for _, name := range names {
+		for _, label := range strings.Split(name, ".") {
+			if len(label) > 63 {
+				label = label[:63]
+			}
+			out = append(out, byte(len(label)))
+			out = append(out, label...)
+		}
+		out = append(out, 0, 0, 16, 0, 1)
+	}
+	return out
+}
+
+// ParseDNSQueryPayload reconstructs payload bytes from all questions.
+func ParseDNSQueryPayload(msg []byte, suffix string) ([]byte, error) {
+	names, err := ParseQueryNames(msg)
+	if err != nil {
+		return nil, err
+	}
+	var out []byte
+	for _, n := range names {
+		b, err := DecodeDNSName(n, suffix)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b...)
+	}
+	return out, nil
 }
 
 // DNSAnswer is a decoded TXT response chunk list.
@@ -224,3 +309,4 @@ func ParseTXTResponse(msg []byte) (*DNSResponse, error) {
 	}
 	return out, nil
 }
+

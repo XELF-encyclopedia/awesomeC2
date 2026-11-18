@@ -27,6 +27,19 @@ type OperatorConfig struct {
 	KeyB64 string `json:"key_b64"`
 }
 
+// AIConfig configures the optional post-exploitation assistant.  Any
+// OpenAI-compatible endpoint works; the API key is read from the environment
+// variable named by KeyEnv so it never lands in the config file.
+type AIConfig struct {
+	Enabled      bool    `json:"enabled"`
+	BaseURL      string  `json:"base_url,omitempty"`
+	Model        string  `json:"model,omitempty"`
+	KeyEnv       string  `json:"key_env,omitempty"` // default C2V2_AI_KEY
+	AutoReadOnly *bool   `json:"auto_read_only,omitempty"`
+	MaxRounds    int     `json:"max_rounds,omitempty"`
+	Temperature  float64 `json:"temperature,omitempty"`
+}
+
 // Config is the server configuration.
 type Config struct {
 	ServerName       string           `json:"server_name"`
@@ -48,6 +61,9 @@ type Config struct {
 	DeadmanSecs      int              `json:"deadman_secs,omitempty"`
 	MaxFrame         int              `json:"max_frame,omitempty"`
 	Verbose          bool             `json:"verbose"`
+	ModulesDir       string           `json:"modules_dir,omitempty"`
+	UpdatePin        string           `json:"update_pin,omitempty"`
+	AI               AIConfig         `json:"ai,omitempty"`
 }
 
 // DefaultConfig returns a lab-safe configuration with example placeholders.
@@ -76,6 +92,8 @@ func DefaultConfig() *Config {
 		Sleep:        60,
 		Jitter:       20,
 		DeadmanSecs:  0,
+		ModulesDir:   "profiles/modules",
+		AI:           AIConfig{KeyEnv: "C2V2_AI_KEY", MaxRounds: 6},
 	}
 }
 
@@ -94,6 +112,12 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if cfg.Tenant == "" {
 		cfg.Tenant = "default"
+	}
+	if cfg.ModulesDir == "" {
+		cfg.ModulesDir = "profiles/modules"
+	}
+	if cfg.AI.KeyEnv == "" {
+		cfg.AI.KeyEnv = "C2V2_AI_KEY"
 	}
 	return cfg, nil
 }

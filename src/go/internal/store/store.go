@@ -1,4 +1,4 @@
-// Package store provides persistence for sessions, tasks, operators, locks,
+﻿// Package store provides persistence for sessions, tasks, operators, locks,
 // audit trail and update manifests. SQLite is the default backend; Postgres
 // can be selected through configuration. A memory backend exists for tests.
 package store
@@ -337,7 +337,7 @@ func HashEntry(prev, ts, actor, action, target, detail string) string {
 
 func (s *sqlStore) Audit(ctx context.Context, actor, action, target, detail string) (*AuditEntry, error) {
 	var prev string
-	row := s.db.QueryRowContext(ctx, s.q(`SELECT COALESCE(hash,'') FROM audit ORDER BY ts DESC, id DESC LIMIT 1`))
+	row := s.db.QueryRowContext(ctx, s.q(`SELECT COALESCE(hash,'') FROM audit ORDER BY rowid DESC LIMIT 1`))
 	_ = row.Scan(&prev)
 	e := AuditEntry{
 		ID:       fmt.Sprintf("%d-%s", time.Now().UnixNano(), randHex(6)),
@@ -361,7 +361,10 @@ func (s *sqlStore) ListAudit(ctx context.Context, limit int) ([]AuditEntry, erro
 	if limit <= 0 || limit > 10000 {
 		limit = 200
 	}
-	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id,ts,actor,action,target,detail,prev_hash,hash FROM audit ORDER BY ts ASC, id ASC LIMIT ?`), limit)
+	// rowid preserves insertion order (the hash chain order); ts has only
+	// second granularity and id is a string, so neither can be ordered on.
+	rows, err := s.db.QueryContext(ctx, s.q(`SELECT id,ts,actor,action,target,detail,prev_hash,hash FROM
+		(SELECT rowid AS r, * FROM audit ORDER BY rowid DESC LIMIT ?) ORDER BY r ASC`), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -641,3 +644,4 @@ func MarshalJSON(v any) json.RawMessage {
 	b, _ := json.Marshal(v)
 	return b
 }
+

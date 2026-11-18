@@ -1,4 +1,4 @@
-package server
+﻿package server
 
 import (
 	"bufio"
@@ -12,9 +12,12 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"sync"
 	"time"
 
+	"c2v2/internal/aiassist"
+	"c2v2/internal/modules"
 	"c2v2/internal/protocol"
 	"c2v2/internal/store"
 )
@@ -86,10 +89,19 @@ type Server struct {
 	opKeys   map[string][]byte
 	opCfg    map[string]OperatorConfig
 
+	modReg *modules.Registry
+
+	updMu   sync.Mutex
+	updPin  string
+	updOk   map[string]bool
+
+	ai *aiassist.Assistant
+
 	closers []io.Closer
 	stop    chan struct{}
 	once    sync.Once
 	bound   map[string]string
+	boundMu sync.Mutex
 
 	// metrics
 	mSessions uint64
@@ -125,10 +137,40 @@ func New(cfg *Config, logger *log.Logger) (*Server, error) {
 		opKeys:   map[string][]byte{},
 		opCfg:    map[string]OperatorConfig{},
 		bound:    map[string]string{},
+		updOk:    map[string]bool{},
 	}
 	s.psk, _ = DecodeKey(cfg.PSKB64)
 	s.killKey, _ = DecodeKey(cfg.KillKeyB64)
 	s.updateKey, _ = DecodeKey(cfg.UpdateKeyB64)
+	s.updPin = cfg.UpdatePin
+
+	// Pluggable modules: builtin catalog + manifests from cfg.ModulesDir.
+	s.modReg = modules.New()
+	if loaded, err := s.modReg.LoadDir(cfg.ModulesDir); err != nil {
+		logger.Printf("modules: %v (loaded=%v)", err, loaded)
+	} else if len(loaded) > 0 {
+		logger.Printf("modules: loaded external manifests: %v", loaded)
+	}
+
+	// Optional AI assistant (provider agnostic, OpenAI-compatible).
+	if cfg.AI.Enabled && cfg.AI.BaseURL != "" {
+		model := cfg.AI.Model
+		if model == "" {
+			model = "gpt-4o-mini"
+		}
+		key := os.Getenv(cfg.AI.KeyEnv)
+		prov := &aiassist.OpenAIProvider{BaseURL: cfg.AI.BaseURL, APIKey: key, Model: model}
+		s.ai = aiassist.New(prov, model)
+		if cfg.AI.AutoReadOnly != nil {
+			s.ai.AutoRead = *cfg.AI.AutoReadOnly
+		}
+		if cfg.AI.MaxRounds > 0 {
+			s.ai.MaxRounds = cfg.AI.MaxRounds
+		}
+		s.ai.Audit = func(actor, action, target, detail string) { s.audit(actor, action, target, detail) }
+		s.buildAITools()
+		logger.Printf("ai: assistant enabled (model=%s base=%s)", model, cfg.AI.BaseURL)
+	}
 	for _, o := range cfg.Operators {
 		key, err := DecodeKey(o.KeyB64)
 		if err != nil || key == nil {
@@ -604,18 +646,10 @@ func (s *Server) PublishUpdate(ctx context.Context, m protocol.UpdateManifest, a
 	if err := s.st.SaveManifest(ctx, store.Manifest{Version: m.Version, Platform: m.Platform, Arch: m.Arch, URL: m.URL, SHA256: m.SHA256, Sig: sig, Rollout: m.Rollout, Created: m.Created}); err != nil {
 		return "", 0, err
 	}
-	sent := 0
-	for _, sess := range s.Sessions() {
-		if !m.Matches(sess.ClientID, sess.OS, sess.Arch) {
-			continue
-		}
-		if err := s.SendMsg(sess, protocol.Update{T: protocol.TUpdate, Manifest: m, Sig: sig}); err != nil {
-			continue
-		}
-		sent++
-	}
-	s.audit(actor, "update.publish", m.Version, fmt.Sprintf("platform=%s arch=%s rollout=%d sent=%d", m.Platform, m.Arch, m.Rollout, sent))
-	return sig, sent, nil
+	// Staged only: pushing requires an explicit `update-approve` by an admin so
+	// an accidental publish never reaches fleets.
+	s.audit(actor, "update.publish", m.Version, fmt.Sprintf("platform=%s arch=%s rollout=%d staged=true", m.Platform, m.Arch, m.Rollout))
+	return sig, 0, nil
 }
 
 // ---------- datagrams ----------
@@ -844,3 +878,4 @@ func (s *Server) PendingCount() int {
 	defer s.pendMu.Unlock()
 	return len(s.pending)
 }
+

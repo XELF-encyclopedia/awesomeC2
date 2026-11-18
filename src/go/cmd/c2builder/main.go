@@ -1,4 +1,4 @@
-// c2builder generates agent profiles and drives cross-platform builds.
+﻿// c2builder generates agent profiles and drives cross-platform builds.
 //
 // It never invents a successful build: every cargo invocation is executed,
 // its output streamed, and failures are reported with the real exit code.
@@ -379,3 +379,9 @@ func keys(m map[string]string) string {
 	}
 	return strings.Join(out, ", ")
 }
+
+
+
+var buildVersion = "dev"
+
+

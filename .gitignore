@@ -34,6 +34,16 @@ src/go/tests/tmp/
 Thumbs.db
 .DS_Store
 
+# Runtime state / databases (may contain lab keys or session data)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local handoff docs (HANDOFF.md contains credentials)
+/HANDOFF.md
+/AGENTS.md
+
 # Never commit secrets
 *.psk
 secrets/
