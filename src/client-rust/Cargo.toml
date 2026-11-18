@@ -1,0 +1,52 @@
+[package]
+name = "c2v2-client"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.75"
+description = "C2V2 cross-platform agent (authorized red-team lab)"
+license = "MIT"
+
+[lib]
+name = "c2v2_client"
+path = "src/lib.rs"
+
+[[bin]]
+name = "c2v2-client"
+path = "src/main.rs"
+required-features = []
+
+[features]
+default = []
+dll = []
+android = []
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "0.26"
+aes-gcm = "0.10"
+chacha20poly1305 = "0.10"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+base64 = "0.22"
+hex = "0.4"
+
+[build-dependencies]
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_UI_Input_KeyboardAndMouse",
+] }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

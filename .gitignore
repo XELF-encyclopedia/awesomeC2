@@ -15,10 +15,18 @@ profiles/**
 profiles/m0/**
 !profiles/m0/.gitkeep
 
-# Test run logs
+# Test run logs / lab artifacts (may contain generated test keys)
 tests/m0/tmp/
 tests/tmp/
+src/go/tests/tmp/
 *.log
+
+# v2 release artifacts
+/dist/
+
+# Upstream reference copy (do not commit)
+/awesomeC2-main/
+/awesomeC2-main.zip
 
 # Local editor / OS noise
 .vscode/
