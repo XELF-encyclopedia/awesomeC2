@@ -7,7 +7,7 @@
 //
 // Usage:
 //
-//	c2gui -url wss://oprand.example.com/ws -user operator -key <b64psk> [-addr 127.0.0.1:8787] [-open]
+//	c2gui -url wss://oprand.example.com/ws -user operator -key <b64psk> [-addr 127.0.0.1:18787] [-open]
 //	c2gui -selftest
 //
 // Panels: sessions, terminal, file transfer, build profiles, module browser,
@@ -216,7 +216,7 @@ func main() {
 	url := flag.String("url", os.Getenv("C2_OPERATOR_URL"), "operator endpoint, e.g. wss://oprand.example.com/ws")
 	user := flag.String("user", os.Getenv("C2_OPERATOR_USER"), "operator user")
 	keyB64 := flag.String("key", os.Getenv("C2_OPERATOR_KEY"), "operator PSK (base64)")
-	addr := flag.String("addr", "127.0.0.1:8787", "local listen address")
+	addr := flag.String("addr", "127.0.0.1:18787", "local listen address")
 	insecure := flag.Bool("insecure", false, "skip TLS verification (lab only)")
 	openBrowser := flag.Bool("open", false, "open the default browser")
 	selftest := flag.Bool("selftest", false, "run an offline self-test and exit")
